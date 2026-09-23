@@ -1,13 +1,16 @@
-"""J-OSLER の検索一覧で、テーブルの決まった位置にある「評価」ボタンを繰り返しクリックする。
+"""J-OSLER の経験・技術・技能の検索一覧で、評価〜確定までを n 回繰り返す。
+
+1 回分の流れ:
+    一覧の N 行目の「評価」 → 知識・技能・態度のラジオ（value=3）を選択
+    → 「承認」 → 「評価を確定する」 → 「戻る」で一覧に戻る
 
 JSF が生成する name / id（例: keikenGijutsuGinoForm:j_idt468:0:j_idt497）は
-リロードのたびに変わることがあるので使わない。代わりに
-「テーブルの N 行目・10 列目にある value="評価" のボタン」という位置で探す。
+リロードのたびに変わることがあるので使わず、位置やボタンの表示名（value）で探す。
 
 使い方:
-    python click_review.py              # 1 行目の評価ボタンを 1 回クリック
-    python click_review.py --repeat 5   # 5 回繰り返す
-    python click_review.py --row 2      # 2 行目のボタンを対象にする
+    python click_review.py --repeat 5          # 1 行目を 5 回評価
+    python click_review.py --repeat 5 --row 2  # 2 行目を対象にする
+    python click_review.py --repeat 5 --level 2
 """
 
 import argparse
@@ -22,9 +25,19 @@ PROFILE_DIR = "browser_profile"
 # 評価ボタンがある列（1 始まり）。元の XPath の td[10]。
 BUTTON_COLUMN = 10
 
+# 評価画面のラジオボタンの name（知識・技能・態度）
+RADIO_NAMES = [
+    "keikenGijutsuGinoHyokaKekkaTorokuForm.chishiki",
+    "keikenGijutsuGinoHyokaKekkaTorokuForm.gino",
+    "keikenGijutsuGinoHyokaKekkaTorokuForm.taido",
+]
+
+# 画面遷移を待つ最大時間（ミリ秒）
+PAGE_TIMEOUT = 30_000
+
 
 def review_button(page: Page, row: int):
-    """row 行目（1 始まり）の「評価」ボタンを返す。"""
+    """一覧の row 行目（1 始まり）の「評価」ボタンを返す。"""
     # 元の XPath から、変わる可能性のある name / id を除いて位置だけで指定したもの。
     xpath = (
         f"xpath=/html/body/div[1]/div/div[5]/form/div[2]/table/tbody"
@@ -35,13 +48,23 @@ def review_button(page: Page, row: int):
         return button.first
 
     # ページのレイアウトが少し変わって上の XPath が外れたときの予備。
-    # form 内のテーブルの row 行目・10 列目から探す。
     return (
         page.locator("form table tbody > tr")
         .nth(row - 1)
         .locator(f"td:nth-child({BUTTON_COLUMN}) input[value='評価']")
         .first
     )
+
+
+def submit_button(page: Page, value: str):
+    return page.locator(f"input[type='submit'][value='{value}']").first
+
+
+def click_and_wait_for(page: Page, button, next_button) -> None:
+    """button をクリックし、次の画面の next_button が表示されるまで待つ。"""
+    button.scroll_into_view_if_needed()
+    button.click()
+    next_button.wait_for(state="visible", timeout=PAGE_TIMEOUT)
 
 
 def ensure_logged_in(page: Page) -> None:
@@ -53,27 +76,35 @@ def ensure_logged_in(page: Page) -> None:
     )
 
 
-def after_click(page: Page) -> None:
-    """評価ボタンを押した後の操作をここに書く。
+def evaluate_once(page: Page, row: int, level: str) -> None:
+    # 一覧 → 評価画面
+    click_and_wait_for(page, review_button(page, row), submit_button(page, "承認"))
 
-    例:
-        page.mouse.wheel(0, 2000)              # 下にスクロール
-        page.click("input[value='保存']")       # 別のボタンをクリック
-        page.wait_for_load_state()
-    """
-    page.wait_for_load_state()
+    # 知識・技能・態度のラジオを選択（ページ下方にあるのでスクロールしてからクリック）
+    for name in RADIO_NAMES:
+        radio = page.locator(f"input[type='radio'][name='{name}'][value='{level}']")
+        radio.scroll_into_view_if_needed()
+        radio.click()
+        if not radio.is_checked():
+            raise RuntimeError(f"ラジオボタンを選択できませんでした: {name}")
 
+    # 承認 → 確認画面（2〜3 秒かかる）
+    click_and_wait_for(page, submit_button(page, "承認"), submit_button(page, "評価を確定する"))
 
-def return_to_list(page: Page) -> None:
-    """一覧画面に戻る。画面に「戻る」ボタンがあるなら、それをクリックするほうが確実。"""
-    page.go_back()
+    # 評価を確定する → 完了画面
+    click_and_wait_for(page, submit_button(page, "評価を確定する"), submit_button(page, "戻る"))
+
+    # 戻る → 一覧
+    submit_button(page, "戻る").click()
+    page.wait_for_url(LIST_URL + "*", timeout=PAGE_TIMEOUT)
     page.wait_for_load_state()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--repeat", type=int, required=True, help="評価を繰り返す回数 n")
     parser.add_argument("--row", type=int, default=1, help="クリックする行（1 始まり）")
-    parser.add_argument("--repeat", type=int, default=1, help="繰り返す回数")
+    parser.add_argument("--level", default="3", help="ラジオボタンの value（3 = 専門医レベル）")
     parser.add_argument("--wait", type=float, default=1.0, help="各回の間の待ち時間（秒）")
     args = parser.parse_args()
 
@@ -83,23 +114,34 @@ def main() -> None:
 
         ensure_logged_in(page)
 
+        answer = input(
+            f"{args.row} 行目の評価を {args.repeat} 回確定します（取り消しできません）。"
+            "よろしいですか？ [y/N]: "
+        )
+        if answer.strip().lower() != "y":
+            print("中止しました。")
+            context.close()
+            return
+
+        done = 0
         for i in range(1, args.repeat + 1):
-            button = review_button(page, args.row)
             try:
-                button.wait_for(state="visible", timeout=10_000)
+                review_button(page, args.row).wait_for(state="visible", timeout=10_000)
             except PlaywrightTimeoutError:
                 print(f"{args.row} 行目に評価ボタンが見つからないので終了します。")
                 break
 
-            print(f"[{i}/{args.repeat}] {args.row} 行目の評価ボタンをクリック")
-            button.click()
-            after_click(page)
+            print(f"[{i}/{args.repeat}] 評価中...")
+            try:
+                evaluate_once(page, args.row, args.level)
+            except (PlaywrightTimeoutError, RuntimeError) as e:
+                print(f"[{i}/{args.repeat}] 途中で止まりました。ブラウザの画面を確認してください。\n{e}")
+                break
+            done += 1
+            print(f"[{i}/{args.repeat}] 確定しました")
+            page.wait_for_timeout(args.wait * 1000)
 
-            if i < args.repeat:
-                return_to_list(page)
-                page.wait_for_timeout(args.wait * 1000)
-
-        input("完了しました。Enter でブラウザを閉じます...")
+        input(f"{done} 件確定しました。Enter でブラウザを閉じます...")
         context.close()
 
 

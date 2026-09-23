@@ -10,17 +10,25 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
+## 1 回分の流れ
+
+一覧の N 行目の「評価」 → 知識・技能・態度のラジオ（value=3「専門医レベル」）を選択
+→ 「承認」 → 「評価を確定する」 → 「戻る」で一覧に戻る
+
+これを指定した回数だけ繰り返します。
+
 ## 実行
 
 ```
 cd j_osler
-python click_review.py                # 1 行目を 1 回
-python click_review.py --repeat 5     # 5 回繰り返す
-python click_review.py --row 2        # 2 行目を対象にする
+python click_review.py --repeat 5             # 1 行目を 5 回評価
+python click_review.py --repeat 5 --row 2     # 2 行目を対象にする
+python click_review.py --repeat 5 --level 2   # ラジオの value を 2 にする
 ```
 
 1. ブラウザが開くので、ログインして評価ボタンが並ぶ一覧を表示し、ターミナルで Enter を押します。
-2. ログイン状態は `browser_profile/` に保存され、次回以降はログインを省略できます（このフォルダは他人に渡さないこと）。
+2. 確認メッセージに `y` と入力すると開始します（確定した評価は取り消せません）。
+3. 画面が想定どおりに進まないとき（ボタンが 30 秒以内に出ないなど）は、その場で止まります。
+4. 途中で止めたいときは、ターミナルで Ctrl+C を押します。
 
-評価ボタンを押した後の操作（スクロールや別ボタンのクリック）は `after_click()` に、
-一覧への戻り方は `return_to_list()` に書きます。
+ログイン状態は `browser_profile/` に保存され、次回以降はログインを省略できます（このフォルダは他人に渡さないこと）。
