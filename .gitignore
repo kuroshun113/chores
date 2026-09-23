@@ -1,0 +1,3 @@
+# ログイン Cookie を含むブラウザのプロファイル（絶対にコミットしない）
+browser_profile/
+__pycache__/
